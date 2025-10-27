@@ -29,9 +29,9 @@ if ($_POST) {
         $hire_date = $_POST['hire_date'];
         $salary = $_POST['salary'];
         
-        // Create user account first
-        $username = strtolower($first_name . '.' . $last_name);
-        $password = password_hash('password', PASSWORD_DEFAULT);
+        // Get username and password from form
+        $username = $functions->sanitize($_POST['username']);
+        $password = password_hash($_POST['password'], PASSWORD_DEFAULT);
         $email = $username . '@university.edu';
         
         try {
@@ -90,6 +90,33 @@ if ($_POST) {
         $salary = $_POST['salary'];
         
         try {
+            $conn->beginTransaction();
+            
+            // Get user_id
+            $query = "SELECT user_id FROM teachers WHERE teacher_id = :teacher_id";
+            $stmt = $conn->prepare($query);
+            $stmt->bindParam(':teacher_id', $teacher_id);
+            $stmt->execute();
+            $user_result = $stmt->fetch();
+            
+            if ($user_result) {
+                // Update username and password if provided
+                $username = $functions->sanitize($_POST['username']);
+                $update_user_query = "UPDATE users SET username = :username";
+                $update_user_params = [':username' => $username];
+                
+                // Only update password if a new one is provided
+                if (!empty($_POST['password'])) {
+                    $update_user_query .= ", password = :password";
+                    $update_user_params[':password'] = password_hash($_POST['password'], PASSWORD_DEFAULT);
+                }
+                
+                $update_user_query .= " WHERE user_id = :user_id";
+                $update_user_params[':user_id'] = $user_result['user_id'];
+                
+                $stmt = $conn->prepare($update_user_query);
+                $stmt->execute($update_user_params);
+            }
             $query = "UPDATE teachers SET first_name = :first_name, last_name = :last_name, 
                      employee_id = :employee_id, department_id = :department_id, 
                      designation = :designation, phone = :phone, hire_date = :hire_date, salary = :salary 
@@ -107,9 +134,11 @@ if ($_POST) {
             $stmt->bindParam(':salary', $salary);
             
             if ($stmt->execute()) {
+                $conn->commit();
                 $message = 'Teacher updated successfully!';
                 $message_type = 'success';
             } else {
+                $conn->rollback();
                 $message = 'Error updating teacher.';
                 $message_type = 'danger';
             }
@@ -178,7 +207,10 @@ $departments = $stmt->fetchAll();
 $edit_teacher = null;
 if (isset($_GET['edit'])) {
     $teacher_id = $_GET['edit'];
-    $query = "SELECT * FROM teachers WHERE teacher_id = :teacher_id";
+    $query = "SELECT t.*, u.username 
+             FROM teachers t 
+             JOIN users u ON t.user_id = u.user_id 
+             WHERE teacher_id = :teacher_id";
     $stmt = $conn->prepare($query);
     $stmt->bindParam(':teacher_id', $teacher_id);
     $stmt->execute();
@@ -348,6 +380,18 @@ if (isset($_GET['edit'])) {
                                 <?php endif; ?>
                                 
                                 <div class="row">
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Username</label>
+                                        <input type="text" class="form-control" name="username" required
+                                               value="<?php echo isset($edit_teacher) ? $edit_teacher['username'] : ''; ?>"
+                                               placeholder="Enter username">
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Password</label>
+                                        <input type="password" class="form-control" name="password" 
+                                               <?php echo !$edit_teacher ? 'required' : ''; ?>
+                                               placeholder="<?php echo $edit_teacher ? 'Leave blank to keep current password' : 'Enter password'; ?>">
+                                    </div>
                                     <div class="col-md-6 mb-3">
                                         <label class="form-label">First Name</label>
                                         <input type="text" class="form-control" name="first_name" 
