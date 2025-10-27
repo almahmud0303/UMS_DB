@@ -3,15 +3,77 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/functions.php';
-require_once '../includes/debug.php';
-require_once '../includes/debug_toggle.php';
+require_once '../config/database.php';
 
 $auth = new Auth();
 $auth->requireRole('admin');
 
-$database = new DebugDatabase();
+$database = new Database();
 $conn = $database->getConnection();
 $functions = new CommonFunctions();
+
+$message = '';
+$message_type = '';
+
+// Handle form submissions
+if ($_POST) {
+    $action = $_POST['action'];
+    
+    if ($action === 'edit') {
+        $enrollment_id = $_POST['enrollment_id'];
+        $offering_id = $_POST['offering_id'];
+        $status = $_POST['status'];
+        
+        try {
+            $query = "UPDATE enrollments SET offering_id = :offering_id, status = :status 
+                     WHERE enrollment_id = :enrollment_id";
+            
+            $stmt = $conn->prepare($query);
+            $stmt->bindParam(':enrollment_id', $enrollment_id);
+            $stmt->bindParam(':offering_id', $offering_id);
+            $stmt->bindParam(':status', $status);
+            
+            if ($stmt->execute()) {
+                $message = 'Enrollment updated successfully!';
+                $message_type = 'success';
+            } else {
+                $message = 'Error updating enrollment.';
+                $message_type = 'danger';
+            }
+        } catch (Exception $e) {
+            $message = 'Error: ' . $e->getMessage();
+            $message_type = 'danger';
+        }
+    }
+}
+
+// Get single enrollment for editing
+$edit_enrollment = null;
+if (isset($_GET['action']) && $_GET['action'] === 'edit' && isset($_GET['id'])) {
+    $enrollment_id = $_GET['id'];
+    $query = "SELECT e.*, s.first_name, s.last_name, s.student_id, s.student_id_number,
+                     c.course_id, c.course_code, c.course_name, co.offering_id, co.teacher_id
+              FROM enrollments e
+              JOIN students s ON e.student_id = s.student_id
+              JOIN course_offerings co ON e.offering_id = co.offering_id
+              JOIN courses c ON co.course_id = c.course_id
+              WHERE e.enrollment_id = :enrollment_id";
+    $stmt = $conn->prepare($query);
+    $stmt->bindParam(':enrollment_id', $enrollment_id);
+    $stmt->execute();
+    $edit_enrollment = $stmt->fetch();
+    
+    // Get all available course offerings
+    $query = "SELECT co.*, c.course_code, c.course_name, 
+                     t.first_name as teacher_first_name, t.last_name as teacher_last_name
+              FROM course_offerings co
+              JOIN courses c ON co.course_id = c.course_id
+              JOIN teachers t ON co.teacher_id = t.teacher_id
+              ORDER BY co.academic_year DESC, co.semester DESC";
+    $stmt = $conn->prepare($query);
+    $stmt->execute();
+    $available_offerings = $stmt->fetchAll();
+}
 
 // Get enrollments with student and course info
 $query = "SELECT e.*, s.first_name, s.last_name, s.student_id_number, s.roll_number,
@@ -150,7 +212,6 @@ $enrollments = $stmt->fetchAll();
                             <span class="navbar-text me-3">
                                 Welcome, <?php echo $_SESSION['first_name'] . ' ' . $_SESSION['last_name']; ?>
                             </span>
-                            <?php echo renderDebugToggle(); ?>
                             <a href="../logout.php" class="btn btn-outline-danger btn-sm">
                                 <i class="fas fa-sign-out-alt me-1"></i>
                                 Logout
@@ -160,6 +221,75 @@ $enrollments = $stmt->fetchAll();
                 </nav>
                 
                 <div class="container-fluid">
+                    <?php if ($message): ?>
+                        <div class="alert alert-<?php echo $message_type; ?> alert-dismissible fade show" role="alert">
+                            <?php echo $message; ?>
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    <?php endif; ?>
+                    
+                    <!-- Edit Enrollment Form -->
+                    <?php if ($edit_enrollment): ?>
+                        <div class="content-card">
+                            <h5 class="mb-3">
+                                <i class="fas fa-user-plus me-2"></i>
+                                Edit Enrollment
+                            </h5>
+                            
+                            <form method="POST" action="">
+                                <input type="hidden" name="action" value="edit">
+                                <input type="hidden" name="enrollment_id" value="<?php echo $edit_enrollment['enrollment_id']; ?>">
+                                
+                                <div class="row">
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Student</label>
+                                        <input type="text" class="form-control" 
+                                               value="<?php echo $edit_enrollment['first_name'] . ' ' . $edit_enrollment['last_name']; ?> (<?php echo $edit_enrollment['student_id_number']; ?>)" 
+                                               disabled>
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Current Course</label>
+                                        <input type="text" class="form-control" 
+                                               value="<?php echo $edit_enrollment['course_code'] . ' - ' . $edit_enrollment['course_name']; ?>" 
+                                               disabled>
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Change to Course Offering</label>
+                                        <select class="form-select" name="offering_id" required>
+                                            <?php foreach ($available_offerings as $offering): ?>
+                                                <option value="<?php echo $offering['offering_id']; ?>" 
+                                                        <?php echo ($edit_enrollment['offering_id'] == $offering['offering_id']) ? 'selected' : ''; ?>>
+                                                    <?php echo $offering['course_code'] . ' - ' . $offering['course_name']; ?>
+                                                    (Semester <?php echo $offering['semester']; ?>, <?php echo $offering['academic_year']; ?>)
+                                                    - <?php echo $offering['teacher_first_name'] . ' ' . $offering['teacher_last_name']; ?>
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Status</label>
+                                        <select class="form-select" name="status" required>
+                                            <option value="enrolled" <?php echo ($edit_enrollment['status'] === 'enrolled') ? 'selected' : ''; ?>>Enrolled</option>
+                                            <option value="dropped" <?php echo ($edit_enrollment['status'] === 'dropped') ? 'selected' : ''; ?>>Dropped</option>
+                                            <option value="completed" <?php echo ($edit_enrollment['status'] === 'completed') ? 'selected' : ''; ?>>Completed</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                
+                                <div class="d-flex gap-2">
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-save me-2"></i>
+                                        Update Enrollment
+                                    </button>
+                                    <a href="enrollments.php" class="btn btn-secondary">
+                                        <i class="fas fa-times me-2"></i>
+                                        Cancel
+                                    </a>
+                                </div>
+                            </form>
+                        </div>
+                    <?php endif; ?>
+                    
                     <!-- Enrollments List -->
                     <div class="content-card">
                         <h5 class="mb-3">
@@ -180,6 +310,7 @@ $enrollments = $stmt->fetchAll();
                                         <th>Academic Year</th>
                                         <th>Enrollment Date</th>
                                         <th>Status</th>
+                                        <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -197,6 +328,12 @@ $enrollments = $stmt->fetchAll();
                                                 <span class="badge bg-<?php echo $enrollment['status'] === 'enrolled' ? 'success' : ($enrollment['status'] === 'completed' ? 'info' : 'warning'); ?>">
                                                     <?php echo ucfirst($enrollment['status']); ?>
                                                 </span>
+                                            </td>
+                                            <td>
+                                                <a href="enrollments.php?action=edit&id=<?php echo $enrollment['enrollment_id']; ?>" 
+                                                   class="btn btn-sm btn-outline-primary">
+                                                    <i class="fas fa-edit"></i>
+                                                </a>
                                             </td>
                                         </tr>
                                     <?php endforeach; ?>
@@ -222,120 +359,5 @@ $enrollments = $stmt->fetchAll();
         });
     </script>
 
-    <!-- Debug Panel -->
-    <?php echo renderDebugPanel(); ?>
-    
-    <style>
-        .query-debugger {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            width: 500px;
-            max-height: 400px;
-            background: white;
-            border: 1px solid #ddd;
-            border-radius: 10px;
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
-            z-index: 9999;
-            display: none;
-        }
-        
-        .query-debugger.show {
-            display: block;
-        }
-        
-        .debug-header {
-            background: #f8f9fa;
-            padding: 10px 15px;
-            border-bottom: 1px solid #ddd;
-            border-radius: 10px 10px 0 0;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .debug-header h6 {
-            margin: 0;
-            color: #495057;
-        }
-        
-        .debug-content {
-            max-height: 300px;
-            overflow-y: auto;
-            padding: 15px;
-        }
-        
-        .query-item {
-            margin-bottom: 15px;
-            padding: 10px;
-            background: #f8f9fa;
-            border-radius: 5px;
-            border-left: 4px solid #007bff;
-        }
-        
-        .query-header {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 8px;
-        }
-        
-        .query-number {
-            font-weight: bold;
-            color: #007bff;
-        }
-        
-        .execution-time {
-            font-size: 0.8em;
-            color: #6c757d;
-            background: #e9ecef;
-            padding: 2px 6px;
-            border-radius: 3px;
-        }
-        
-        .query-sql pre {
-            background: #2d3748;
-            color: #e2e8f0;
-            padding: 10px;
-            border-radius: 5px;
-            font-size: 0.85em;
-            margin: 8px 0;
-            overflow-x: auto;
-        }
-        
-        .query-params {
-            font-size: 0.85em;
-            color: #6c757d;
-        }
-        
-        .query-params code {
-            background: #e9ecef;
-            padding: 2px 4px;
-            border-radius: 3px;
-            font-size: 0.8em;
-        }
-        
-        .debug-toggle {
-            margin-right: 10px;
-        }
-    </style>
-    
-    <script>
-        function toggleDebugger() {
-            const debugger = document.getElementById('queryDebugger');
-            if (debugger) {
-                debugger.classList.toggle('show');
-            }
-        }
-        
-        // Auto-show debugger if queries are present
-        <?php if (QueryDebugger::isEnabled() && !empty(QueryDebugger::getQueries())): ?>
-        document.addEventListener('DOMContentLoaded', function() {
-            const debugger = document.getElementById('queryDebugger');
-            if (debugger) {
-                debugger.classList.add('show');
-            }
-        });
-        <?php endif; ?>
-    </script>
 </body>
 </html>

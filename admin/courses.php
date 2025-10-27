@@ -3,13 +3,12 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/functions.php';
-require_once '../includes/debug.php';
-require_once '../includes/debug_toggle.php';
+require_once '../config/database.php';
 
 $auth = new Auth();
 $auth->requireRole('admin');
 
-$database = new DebugDatabase();
+$database = new Database();
 $conn = $database->getConnection();
 $functions = new CommonFunctions();
 
@@ -113,10 +112,19 @@ if (isset($_GET['delete'])) {
     }
 }
 
-// Get courses with department info
-$query = "SELECT c.*, d.name as department_name 
+// Get courses with department info and teacher assignments
+$query = "SELECT c.*, d.name as department_name,
+                 GROUP_CONCAT(
+                     CONCAT(t.first_name, ' ', t.last_name, ' (Semester ', co.semester, ')') 
+                     ORDER BY co.academic_year DESC, co.semester DESC
+                     SEPARATOR ', '
+                 ) as assigned_teachers,
+                 COUNT(DISTINCT co.teacher_id) as teacher_count
           FROM courses c 
           JOIN departments d ON c.department_id = d.department_id 
+          LEFT JOIN course_offerings co ON c.course_id = co.course_id
+          LEFT JOIN teachers t ON co.teacher_id = t.teacher_id
+          GROUP BY c.course_id
           ORDER BY c.course_id DESC";
 $stmt = $conn->prepare($query);
 $stmt->execute();
@@ -127,6 +135,72 @@ $query = "SELECT * FROM departments ORDER BY name";
 $stmt = $conn->prepare($query);
 $stmt->execute();
 $departments = $stmt->fetchAll();
+
+// Handle teacher assignment
+if ($_POST && isset($_POST['action']) && $_POST['action'] === 'assign_teacher') {
+    $course_id = $_POST['course_id'];
+    $teacher_id = $_POST['teacher_id'];
+    $semester = $_POST['semester'];
+    $academic_year = $functions->sanitize($_POST['academic_year']);
+    $max_students = $_POST['max_students'];
+    $schedule = $functions->sanitize($_POST['schedule']);
+    $classroom = $functions->sanitize($_POST['classroom']);
+    
+    try {
+        $query = "INSERT INTO course_offerings (course_id, teacher_id, semester, academic_year, max_students, schedule, classroom) 
+                 VALUES (:course_id, :teacher_id, :semester, :academic_year, :max_students, :schedule, :classroom)";
+        
+        $stmt = $conn->prepare($query);
+        $stmt->bindParam(':course_id', $course_id);
+        $stmt->bindParam(':teacher_id', $teacher_id);
+        $stmt->bindParam(':semester', $semester);
+        $stmt->bindParam(':academic_year', $academic_year);
+        $stmt->bindParam(':max_students', $max_students);
+        $stmt->bindParam(':schedule', $schedule);
+        $stmt->bindParam(':classroom', $classroom);
+        
+        if ($stmt->execute()) {
+            $message = 'Teacher assigned to course successfully!';
+            $message_type = 'success';
+        } else {
+            $message = 'Error assigning teacher.';
+            $message_type = 'danger';
+        }
+    } catch (Exception $e) {
+        $message = 'Error: ' . $e->getMessage();
+        $message_type = 'danger';
+    }
+}
+
+// Get teachers for assignment dropdown
+$query = "SELECT t.*, d.name as department_name FROM teachers t 
+          JOIN departments d ON t.department_id = d.department_id 
+          ORDER BY t.first_name, t.last_name";
+$stmt = $conn->prepare($query);
+$stmt->execute();
+$teachers = $stmt->fetchAll();
+
+// Get course for teacher assignment
+$assign_course = null;
+if (isset($_GET['assign_teacher'])) {
+    $course_id = $_GET['assign_teacher'];
+    $query = "SELECT * FROM courses WHERE course_id = :course_id";
+    $stmt = $conn->prepare($query);
+    $stmt->bindParam(':course_id', $course_id);
+    $stmt->execute();
+    $assign_course = $stmt->fetch();
+    
+    // Get current assignments for this course
+    $query = "SELECT co.*, t.first_name, t.last_name, t.employee_id 
+              FROM course_offerings co
+              JOIN teachers t ON co.teacher_id = t.teacher_id
+              WHERE co.course_id = :course_id
+              ORDER BY co.academic_year DESC, co.semester DESC";
+    $stmt = $conn->prepare($query);
+    $stmt->bindParam(':course_id', $course_id);
+    $stmt->execute();
+    $current_assignments = $stmt->fetchAll();
+}
 
 // Get course for editing
 $edit_course = null;
@@ -271,7 +345,6 @@ if (isset($_GET['edit'])) {
                             <span class="navbar-text me-3">
                                 Welcome, <?php echo $_SESSION['first_name'] . ' ' . $_SESSION['last_name']; ?>
                             </span>
-                            <?php echo renderDebugToggle(); ?>
                             <a href="../logout.php" class="btn btn-outline-danger btn-sm">
                                 <i class="fas fa-sign-out-alt me-1"></i>
                                 Logout
@@ -285,6 +358,109 @@ if (isset($_GET['edit'])) {
                         <div class="alert alert-<?php echo $message_type; ?> alert-dismissible fade show" role="alert">
                             <?php echo $message; ?>
                             <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    <?php endif; ?>
+                    
+                    <!-- Assign Teacher to Course Form -->
+                    <?php if ($assign_course): ?>
+                        <div class="content-card">
+                            <h5 class="mb-3">
+                                <i class="fas fa-user-tie me-2"></i>
+                                Assign Teacher to <?php echo $assign_course['course_code']; ?> - <?php echo $assign_course['course_name']; ?>
+                            </h5>
+                            
+                            <form method="POST" action="">
+                                <input type="hidden" name="action" value="assign_teacher">
+                                <input type="hidden" name="course_id" value="<?php echo $assign_course['course_id']; ?>">
+                                
+                                <div class="row">
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Select Teacher</label>
+                                        <select class="form-select" name="teacher_id" required>
+                                            <option value="">Select Teacher</option>
+                                            <?php foreach ($teachers as $teacher): ?>
+                                                <option value="<?php echo $teacher['teacher_id']; ?>">
+                                                    <?php echo $teacher['first_name'] . ' ' . $teacher['last_name']; ?> 
+                                                    (<?php echo $teacher['employee_id']; ?>) - <?php echo $teacher['department_name']; ?>
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-3 mb-3">
+                                        <label class="form-label">Semester</label>
+                                        <select class="form-select" name="semester" required>
+                                            <option value="1">Semester 1</option>
+                                            <option value="2">Semester 2</option>
+                                            <option value="3">Semester 3</option>
+                                            <option value="4">Semester 4</option>
+                                            <option value="5">Semester 5</option>
+                                            <option value="6">Semester 6</option>
+                                            <option value="7">Semester 7</option>
+                                            <option value="8">Semester 8</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-3 mb-3">
+                                        <label class="form-label">Academic Year</label>
+                                        <input type="text" class="form-control" name="academic_year" 
+                                               placeholder="e.g., 2024-25" value="2024-25" required>
+                                    </div>
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label">Max Students</label>
+                                        <input type="number" class="form-control" name="max_students" 
+                                               value="30" min="1" max="100" required>
+                                    </div>
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label">Schedule</label>
+                                        <input type="text" class="form-control" name="schedule" 
+                                               placeholder="e.g., MWF 9:00-10:00">
+                                    </div>
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label">Classroom</label>
+                                        <input type="text" class="form-control" name="classroom" 
+                                               placeholder="e.g., CSE-101">
+                                    </div>
+                                </div>
+                                
+                                <div class="d-flex gap-2">
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-save me-2"></i>
+                                        Assign Teacher
+                                    </button>
+                                    <a href="courses.php" class="btn btn-secondary">
+                                        <i class="fas fa-times me-2"></i>
+                                        Cancel
+                                    </a>
+                                </div>
+                            </form>
+                            
+                            <?php if (isset($current_assignments) && count($current_assignments) > 0): ?>
+                                <hr class="my-4">
+                                <h6 class="mb-3">Current Teacher Assignments</h6>
+                                <div class="table-responsive">
+                                    <table class="table table-sm table-hover">
+                                        <thead>
+                                            <tr>
+                                                <th>Teacher</th>
+                                                <th>Semester</th>
+                                                <th>Academic Year</th>
+                                                <th>Schedule</th>
+                                                <th>Classroom</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php foreach ($current_assignments as $assignment): ?>
+                                                <tr>
+                                                    <td><?php echo $assignment['first_name'] . ' ' . $assignment['last_name']; ?></td>
+                                                    <td>Semester <?php echo $assignment['semester']; ?></td>
+                                                    <td><?php echo $assignment['academic_year']; ?></td>
+                                                    <td><?php echo $assignment['schedule'] ?: '-'; ?></td>
+                                                    <td><?php echo $assignment['classroom'] ?: '-'; ?></td>
+                                                </tr>
+                                            <?php endforeach; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            <?php endif; ?>
                         </div>
                     <?php endif; ?>
                     
@@ -378,6 +554,7 @@ if (isset($_GET['edit'])) {
                                         <th>Course Name</th>
                                         <th>Credits</th>
                                         <th>Department</th>
+                                        <th>Assigned Teachers</th>
                                         <th>Prerequisites</th>
                                         <th>Actions</th>
                                     </tr>
@@ -390,15 +567,27 @@ if (isset($_GET['edit'])) {
                                             <td><?php echo $course['course_name']; ?></td>
                                             <td><?php echo $course['credits']; ?></td>
                                             <td><?php echo $course['department_name']; ?></td>
+                                            <td>
+                                                <?php if ($course['assigned_teachers']): ?>
+                                                    <span class="text-success"><?php echo $course['assigned_teachers']; ?></span>
+                                                    <br><small class="text-muted"><?php echo $course['teacher_count']; ?> teacher(s)</small>
+                                                <?php else: ?>
+                                                    <span class="text-danger">No teacher assigned</span>
+                                                <?php endif; ?>
+                                            </td>
                                             <td><?php echo $course['prerequisites'] ?: 'None'; ?></td>
                                             <td>
+                                                <a href="courses.php?assign_teacher=<?php echo $course['course_id']; ?>" 
+                                                   class="btn btn-sm btn-outline-success me-1" title="Assign Teacher">
+                                                    <i class="fas fa-user-tie"></i>
+                                                </a>
                                                 <a href="courses.php?edit=<?php echo $course['course_id']; ?>" 
-                                                   class="btn btn-sm btn-outline-primary me-1">
+                                                   class="btn btn-sm btn-outline-primary me-1" title="Edit">
                                                     <i class="fas fa-edit"></i>
                                                 </a>
                                                 <a href="courses.php?delete=<?php echo $course['course_id']; ?>" 
                                                    class="btn btn-sm btn-outline-danger"
-                                                   onclick="return confirm('Are you sure you want to delete this course?')">
+                                                   onclick="return confirm('Are you sure you want to delete this course?')" title="Delete">
                                                     <i class="fas fa-trash"></i>
                                                 </a>
                                             </td>
@@ -426,120 +615,5 @@ if (isset($_GET['edit'])) {
         });
     </script>
 
-    <!-- Debug Panel -->
-    <?php echo renderDebugPanel(); ?>
-    
-    <style>
-        .query-debugger {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            width: 500px;
-            max-height: 400px;
-            background: white;
-            border: 1px solid #ddd;
-            border-radius: 10px;
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
-            z-index: 9999;
-            display: none;
-        }
-        
-        .query-debugger.show {
-            display: block;
-        }
-        
-        .debug-header {
-            background: #f8f9fa;
-            padding: 10px 15px;
-            border-bottom: 1px solid #ddd;
-            border-radius: 10px 10px 0 0;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .debug-header h6 {
-            margin: 0;
-            color: #495057;
-        }
-        
-        .debug-content {
-            max-height: 300px;
-            overflow-y: auto;
-            padding: 15px;
-        }
-        
-        .query-item {
-            margin-bottom: 15px;
-            padding: 10px;
-            background: #f8f9fa;
-            border-radius: 5px;
-            border-left: 4px solid #007bff;
-        }
-        
-        .query-header {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 8px;
-        }
-        
-        .query-number {
-            font-weight: bold;
-            color: #007bff;
-        }
-        
-        .execution-time {
-            font-size: 0.8em;
-            color: #6c757d;
-            background: #e9ecef;
-            padding: 2px 6px;
-            border-radius: 3px;
-        }
-        
-        .query-sql pre {
-            background: #2d3748;
-            color: #e2e8f0;
-            padding: 10px;
-            border-radius: 5px;
-            font-size: 0.85em;
-            margin: 8px 0;
-            overflow-x: auto;
-        }
-        
-        .query-params {
-            font-size: 0.85em;
-            color: #6c757d;
-        }
-        
-        .query-params code {
-            background: #e9ecef;
-            padding: 2px 4px;
-            border-radius: 3px;
-            font-size: 0.8em;
-        }
-        
-        .debug-toggle {
-            margin-right: 10px;
-        }
-    </style>
-    
-    <script>
-        function toggleDebugger() {
-            const debugger = document.getElementById('queryDebugger');
-            if (debugger) {
-                debugger.classList.toggle('show');
-            }
-        }
-        
-        // Auto-show debugger if queries are present
-        <?php if (QueryDebugger::isEnabled() && !empty(QueryDebugger::getQueries())): ?>
-        document.addEventListener('DOMContentLoaded', function() {
-            const debugger = document.getElementById('queryDebugger');
-            if (debugger) {
-                debugger.classList.add('show');
-            }
-        });
-        <?php endif; ?>
-    </script>
 </body>
 </html>

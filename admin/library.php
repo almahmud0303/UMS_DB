@@ -3,15 +3,159 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/functions.php';
-require_once '../includes/debug.php';
-require_once '../includes/debug_toggle.php';
+require_once '../config/database.php';
 
 $auth = new Auth();
 $auth->requireRole('admin');
 
-$database = new DebugDatabase();
+$database = new Database();
 $conn = $database->getConnection();
 $functions = new CommonFunctions();
+
+$message = '';
+$message_type = '';
+
+// Handle form submissions for books
+if ($_POST) {
+    $action = $_POST['action'];
+    
+    if ($action === 'add_book') {
+        $title = $functions->sanitize($_POST['title']);
+        $author = $functions->sanitize($_POST['author']);
+        $isbn = $functions->sanitize($_POST['isbn']);
+        $publisher = $functions->sanitize($_POST['publisher']);
+        $publication_year = $_POST['publication_year'];
+        $department_id = $_POST['department_id'];
+        $category = $functions->sanitize($_POST['category']);
+        $total_copies = $_POST['total_copies'];
+        $available_copies = $_POST['available_copies'];
+        $shelf_location = $functions->sanitize($_POST['shelf_location']);
+        
+        try {
+            $query = "INSERT INTO library_books (title, author, isbn, publisher, publication_year, 
+                     department_id, category, total_copies, available_copies, shelf_location) 
+                     VALUES (:title, :author, :isbn, :publisher, :publication_year, 
+                     :department_id, :category, :total_copies, :available_copies, :shelf_location)";
+            
+            $stmt = $conn->prepare($query);
+            $stmt->bindParam(':title', $title);
+            $stmt->bindParam(':author', $author);
+            $stmt->bindParam(':isbn', $isbn);
+            $stmt->bindParam(':publisher', $publisher);
+            $stmt->bindParam(':publication_year', $publication_year);
+            $stmt->bindParam(':department_id', $department_id);
+            $stmt->bindParam(':category', $category);
+            $stmt->bindParam(':total_copies', $total_copies);
+            $stmt->bindParam(':available_copies', $available_copies);
+            $stmt->bindParam(':shelf_location', $shelf_location);
+            
+            if ($stmt->execute()) {
+                $message = 'Book added successfully!';
+                $message_type = 'success';
+            } else {
+                $message = 'Error adding book.';
+                $message_type = 'danger';
+            }
+        } catch (Exception $e) {
+            $message = 'Error: ' . $e->getMessage();
+            $message_type = 'danger';
+        }
+    }
+    
+    if ($action === 'edit_book') {
+        $book_id = $_POST['book_id'];
+        $title = $functions->sanitize($_POST['title']);
+        $author = $functions->sanitize($_POST['author']);
+        $isbn = $functions->sanitize($_POST['isbn']);
+        $publisher = $functions->sanitize($_POST['publisher']);
+        $publication_year = $_POST['publication_year'];
+        $department_id = $_POST['department_id'];
+        $category = $functions->sanitize($_POST['category']);
+        $total_copies = $_POST['total_copies'];
+        $available_copies = $_POST['available_copies'];
+        $shelf_location = $functions->sanitize($_POST['shelf_location']);
+        
+        try {
+            $query = "UPDATE library_books SET title = :title, author = :author, isbn = :isbn, 
+                     publisher = :publisher, publication_year = :publication_year, 
+                     department_id = :department_id, category = :category, 
+                     total_copies = :total_copies, available_copies = :available_copies, 
+                     shelf_location = :shelf_location WHERE book_id = :book_id";
+            
+            $stmt = $conn->prepare($query);
+            $stmt->bindParam(':book_id', $book_id);
+            $stmt->bindParam(':title', $title);
+            $stmt->bindParam(':author', $author);
+            $stmt->bindParam(':isbn', $isbn);
+            $stmt->bindParam(':publisher', $publisher);
+            $stmt->bindParam(':publication_year', $publication_year);
+            $stmt->bindParam(':department_id', $department_id);
+            $stmt->bindParam(':category', $category);
+            $stmt->bindParam(':total_copies', $total_copies);
+            $stmt->bindParam(':available_copies', $available_copies);
+            $stmt->bindParam(':shelf_location', $shelf_location);
+            
+            if ($stmt->execute()) {
+                $message = 'Book updated successfully!';
+                $message_type = 'success';
+            } else {
+                $message = 'Error updating book.';
+                $message_type = 'danger';
+            }
+        } catch (Exception $e) {
+            $message = 'Error: ' . $e->getMessage();
+            $message_type = 'danger';
+        }
+    }
+}
+
+// Handle delete
+if (isset($_GET['delete_book'])) {
+    $book_id = $_GET['delete_book'];
+    
+    try {
+        $query = "DELETE FROM library_books WHERE book_id = :book_id";
+        $stmt = $conn->prepare($query);
+        $stmt->bindParam(':book_id', $book_id);
+        
+        if ($stmt->execute()) {
+            $message = 'Book deleted successfully!';
+            $message_type = 'success';
+        } else {
+            $message = 'Error deleting book.';
+            $message_type = 'danger';
+        }
+    } catch (Exception $e) {
+        $message = 'Error: ' . $e->getMessage();
+        $message_type = 'danger';
+    }
+}
+
+// Get books
+$query = "SELECT lb.*, d.name as department_name 
+          FROM library_books lb 
+          LEFT JOIN departments d ON lb.department_id = d.department_id 
+          ORDER BY lb.book_id DESC";
+$stmt = $conn->prepare($query);
+$stmt->execute();
+$books = $stmt->fetchAll();
+
+// Get departments for forms
+$query = "SELECT * FROM departments ORDER BY name";
+$stmt = $conn->prepare($query);
+$stmt->execute();
+$departments = $stmt->fetchAll();
+
+// Get single book for editing
+$edit_book = null;
+if (isset($_GET['edit_book'])) {
+    $book_id = $_GET['edit_book'];
+    $query = "SELECT * FROM library_books WHERE book_id = :book_id";
+    $stmt = $conn->prepare($query);
+    $stmt->bindParam(':book_id', $book_id);
+    $stmt->execute();
+    $edit_book = $stmt->fetch();
+}
 
 // Get library issues with book and student info
 $query = "SELECT li.*, lb.title, lb.author, lb.isbn,
@@ -147,7 +291,6 @@ $issues = $stmt->fetchAll();
                             <span class="navbar-text me-3">
                                 Welcome, <?php echo $_SESSION['first_name'] . ' ' . $_SESSION['last_name']; ?>
                             </span>
-                            <?php echo renderDebugToggle(); ?>
                             <a href="../logout.php" class="btn btn-outline-danger btn-sm">
                                 <i class="fas fa-sign-out-alt me-1"></i>
                                 Logout
@@ -157,11 +300,174 @@ $issues = $stmt->fetchAll();
                 </nav>
                 
                 <div class="container-fluid">
+                    <?php if ($message): ?>
+                        <div class="alert alert-<?php echo $message_type; ?> alert-dismissible fade show" role="alert">
+                            <?php echo $message; ?>
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    <?php endif; ?>
+                    
+                    <!-- Add/Edit Book Form -->
+                    <?php if (isset($_GET['action']) && ($_GET['action'] === 'add_book' || $edit_book)): ?>
+                        <div class="content-card">
+                            <h5 class="mb-3">
+                                <i class="fas fa-book me-2"></i>
+                                <?php echo $edit_book ? 'Edit Book' : 'Add New Book'; ?>
+                            </h5>
+                            
+                            <form method="POST" action="">
+                                <input type="hidden" name="action" value="<?php echo $edit_book ? 'edit_book' : 'add_book'; ?>">
+                                <?php if ($edit_book): ?>
+                                    <input type="hidden" name="book_id" value="<?php echo $edit_book['book_id']; ?>">
+                                <?php endif; ?>
+                                
+                                <div class="row">
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Title</label>
+                                        <input type="text" class="form-control" name="title" 
+                                               value="<?php echo $edit_book['title'] ?? ''; ?>" required>
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Author</label>
+                                        <input type="text" class="form-control" name="author" 
+                                               value="<?php echo $edit_book['author'] ?? ''; ?>" required>
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">ISBN</label>
+                                        <input type="text" class="form-control" name="isbn" 
+                                               value="<?php echo $edit_book['isbn'] ?? ''; ?>">
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Publisher</label>
+                                        <input type="text" class="form-control" name="publisher" 
+                                               value="<?php echo $edit_book['publisher'] ?? ''; ?>">
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Publication Year</label>
+                                        <input type="number" class="form-control" name="publication_year" 
+                                               value="<?php echo $edit_book['publication_year'] ?? ''; ?>" min="1900" max="2030">
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Department</label>
+                                        <select class="form-select" name="department_id">
+                                            <option value="">Select Department (Optional)</option>
+                                            <?php foreach ($departments as $dept): ?>
+                                                <option value="<?php echo $dept['department_id']; ?>" 
+                                                        <?php echo ($edit_book && $edit_book['department_id'] == $dept['department_id']) ? 'selected' : ''; ?>>
+                                                    <?php echo $dept['name']; ?>
+                                                </option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Category</label>
+                                        <input type="text" class="form-control" name="category" 
+                                               value="<?php echo $edit_book['category'] ?? ''; ?>">
+                                    </div>
+                                    <div class="col-md-3 mb-3">
+                                        <label class="form-label">Total Copies</label>
+                                        <input type="number" class="form-control" name="total_copies" 
+                                               value="<?php echo $edit_book['total_copies'] ?? '1'; ?>" min="1" required>
+                                    </div>
+                                    <div class="col-md-3 mb-3">
+                                        <label class="form-label">Available Copies</label>
+                                        <input type="number" class="form-control" name="available_copies" 
+                                               value="<?php echo $edit_book['available_copies'] ?? '1'; ?>" min="0" required>
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Shelf Location</label>
+                                        <input type="text" class="form-control" name="shelf_location" 
+                                               value="<?php echo $edit_book['shelf_location'] ?? ''; ?>"
+                                               placeholder="e.g., CS-A1">
+                                    </div>
+                                </div>
+                                
+                                <div class="d-flex gap-2">
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-save me-2"></i>
+                                        <?php echo $edit_book ? 'Update Book' : 'Add Book'; ?>
+                                    </button>
+                                    <a href="library.php" class="btn btn-secondary">
+                                        <i class="fas fa-times me-2"></i>
+                                        Cancel
+                                    </a>
+                                </div>
+                            </form>
+                        </div>
+                    <?php endif; ?>
+                    
+                    <!-- Books List -->
+                    <div class="content-card">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h5 class="mb-0">
+                                <i class="fas fa-book me-2"></i>
+                                Library Books
+                            </h5>
+                            <a href="library.php?action=add_book" class="btn btn-primary">
+                                <i class="fas fa-plus me-2"></i>
+                                Add New Book
+                            </a>
+                        </div>
+                        
+                        <div class="table-responsive">
+                            <table class="table table-striped table-hover" id="booksTable">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Title</th>
+                                        <th>Author</th>
+                                        <th>ISBN</th>
+                                        <th>Publisher</th>
+                                        <th>Year</th>
+                                        <th>Department</th>
+                                        <th>Category</th>
+                                        <th>Copies</th>
+                                        <th>Available</th>
+                                        <th>Shelf</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($books as $book): ?>
+                                        <tr>
+                                            <td><?php echo $book['book_id']; ?></td>
+                                            <td><?php echo $book['title']; ?></td>
+                                            <td><?php echo $book['author']; ?></td>
+                                            <td><?php echo $book['isbn'] ?: '-'; ?></td>
+                                            <td><?php echo $book['publisher'] ?: '-'; ?></td>
+                                            <td><?php echo $book['publication_year'] ?: '-'; ?></td>
+                                            <td><?php echo $book['department_name'] ?: '-'; ?></td>
+                                            <td><?php echo $book['category'] ?: '-'; ?></td>
+                                            <td><?php echo $book['total_copies']; ?></td>
+                                            <td>
+                                                <span class="badge bg-<?php echo $book['available_copies'] > 0 ? 'success' : 'danger'; ?>">
+                                                    <?php echo $book['available_copies']; ?>
+                                                </span>
+                                            </td>
+                                            <td><?php echo $book['shelf_location'] ?: '-'; ?></td>
+                                            <td>
+                                                <a href="library.php?edit_book=<?php echo $book['book_id']; ?>" 
+                                                   class="btn btn-sm btn-outline-primary me-1">
+                                                    <i class="fas fa-edit"></i>
+                                                </a>
+                                                <a href="library.php?delete_book=<?php echo $book['book_id']; ?>" 
+                                                   class="btn btn-sm btn-outline-danger"
+                                                   onclick="return confirm('Are you sure you want to delete this book?')">
+                                                    <i class="fas fa-trash"></i>
+                                                </a>
+                                            </td>
+                                        </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    
                     <!-- Library Issues List -->
                     <div class="content-card">
                         <h5 class="mb-3">
                             <i class="fas fa-book-open me-2"></i>
-                            Library Book Issues
+                            Book Issues
                         </h5>
                         
                         <div class="table-responsive">
@@ -218,6 +524,11 @@ $issues = $stmt->fetchAll();
     <script src="https://cdn.datatables.net/1.13.6/js/dataTables.bootstrap5.min.js"></script>
     <script>
         $(document).ready(function() {
+
+            $('#booksTable').DataTable({
+                "pageLength": 25,
+                "order": [[0, "desc"]]
+            });
             $('#libraryTable').DataTable({
                 "pageLength": 25,
                 "order": [[0, "desc"]]
@@ -225,120 +536,5 @@ $issues = $stmt->fetchAll();
         });
     </script>
 
-    <!-- Debug Panel -->
-    <?php echo renderDebugPanel(); ?>
-    
-    <style>
-        .query-debugger {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            width: 500px;
-            max-height: 400px;
-            background: white;
-            border: 1px solid #ddd;
-            border-radius: 10px;
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
-            z-index: 9999;
-            display: none;
-        }
-        
-        .query-debugger.show {
-            display: block;
-        }
-        
-        .debug-header {
-            background: #f8f9fa;
-            padding: 10px 15px;
-            border-bottom: 1px solid #ddd;
-            border-radius: 10px 10px 0 0;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .debug-header h6 {
-            margin: 0;
-            color: #495057;
-        }
-        
-        .debug-content {
-            max-height: 300px;
-            overflow-y: auto;
-            padding: 15px;
-        }
-        
-        .query-item {
-            margin-bottom: 15px;
-            padding: 10px;
-            background: #f8f9fa;
-            border-radius: 5px;
-            border-left: 4px solid #007bff;
-        }
-        
-        .query-header {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 8px;
-        }
-        
-        .query-number {
-            font-weight: bold;
-            color: #007bff;
-        }
-        
-        .execution-time {
-            font-size: 0.8em;
-            color: #6c757d;
-            background: #e9ecef;
-            padding: 2px 6px;
-            border-radius: 3px;
-        }
-        
-        .query-sql pre {
-            background: #2d3748;
-            color: #e2e8f0;
-            padding: 10px;
-            border-radius: 5px;
-            font-size: 0.85em;
-            margin: 8px 0;
-            overflow-x: auto;
-        }
-        
-        .query-params {
-            font-size: 0.85em;
-            color: #6c757d;
-        }
-        
-        .query-params code {
-            background: #e9ecef;
-            padding: 2px 4px;
-            border-radius: 3px;
-            font-size: 0.8em;
-        }
-        
-        .debug-toggle {
-            margin-right: 10px;
-        }
-    </style>
-    
-    <script>
-        function toggleDebugger() {
-            const debugger = document.getElementById('queryDebugger');
-            if (debugger) {
-                debugger.classList.toggle('show');
-            }
-        }
-        
-        // Auto-show debugger if queries are present
-        <?php if (QueryDebugger::isEnabled() && !empty(QueryDebugger::getQueries())): ?>
-        document.addEventListener('DOMContentLoaded', function() {
-            const debugger = document.getElementById('queryDebugger');
-            if (debugger) {
-                debugger.classList.add('show');
-            }
-        });
-        <?php endif; ?>
-    </script>
 </body>
 </html>

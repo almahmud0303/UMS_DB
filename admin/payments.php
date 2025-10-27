@@ -3,15 +3,71 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/functions.php';
-require_once '../includes/debug.php';
-require_once '../includes/debug_toggle.php';
+require_once '../config/database.php';
 
 $auth = new Auth();
 $auth->requireRole('admin');
 
-$database = new DebugDatabase();
+$database = new Database();
 $conn = $database->getConnection();
 $functions = new CommonFunctions();
+
+$message = '';
+$message_type = '';
+
+// Handle form submissions
+if ($_POST) {
+    $action = $_POST['action'];
+    
+    if ($action === 'edit') {
+        $payment_id = $_POST['payment_id'];
+        $amount = $_POST['amount'];
+        $status = $_POST['status'];
+        $transaction_id = $functions->sanitize($_POST['transaction_id']);
+        $payment_method = $functions->sanitize($_POST['payment_method']);
+        
+        try {
+            $query = "UPDATE payments SET amount = :amount, status = :status, 
+                     transaction_id = :transaction_id, payment_method = :payment_method
+                     WHERE payment_id = :payment_id";
+            
+            $stmt = $conn->prepare($query);
+            $stmt->bindParam(':payment_id', $payment_id);
+            $stmt->bindParam(':amount', $amount);
+            $stmt->bindParam(':status', $status);
+            $stmt->bindParam(':transaction_id', $transaction_id);
+            $stmt->bindParam(':payment_method', $payment_method);
+            
+            if ($stmt->execute()) {
+                $message = 'Payment updated successfully!';
+                $message_type = 'success';
+            } else {
+                $message = 'Error updating payment.';
+                $message_type = 'danger';
+            }
+        } catch (Exception $e) {
+            $message = 'Error: ' . $e->getMessage();
+            $message_type = 'danger';
+        }
+    }
+}
+
+// Get single payment for editing
+$edit_payment = null;
+if (isset($_GET['action']) && $_GET['action'] === 'edit' && isset($_GET['id'])) {
+    $payment_id = $_GET['id'];
+    $query = "SELECT p.*, s.first_name, s.last_name, s.student_id_number, 
+                     pr.name as program_name, f.fee_type
+              FROM payments p
+              JOIN students s ON p.student_id = s.student_id
+              JOIN programs pr ON s.program_id = pr.program_id
+              JOIN fees f ON p.fee_id = f.fee_id
+              WHERE p.payment_id = :payment_id";
+    $stmt = $conn->prepare($query);
+    $stmt->bindParam(':payment_id', $payment_id);
+    $stmt->execute();
+    $edit_payment = $stmt->fetch();
+}
 
 // Get payment records with student info
 $query = "SELECT p.*, s.first_name, s.last_name, s.student_id_number, s.roll_number,
@@ -148,7 +204,6 @@ $payments = $stmt->fetchAll();
                             <span class="navbar-text me-3">
                                 Welcome, <?php echo $_SESSION['first_name'] . ' ' . $_SESSION['last_name']; ?>
                             </span>
-                            <?php echo renderDebugToggle(); ?>
                             <a href="../logout.php" class="btn btn-outline-danger btn-sm">
                                 <i class="fas fa-sign-out-alt me-1"></i>
                                 Logout
@@ -158,6 +213,78 @@ $payments = $stmt->fetchAll();
                 </nav>
                 
                 <div class="container-fluid">
+                    <?php if ($message): ?>
+                        <div class="alert alert-<?php echo $message_type; ?> alert-dismissible fade show" role="alert">
+                            <?php echo $message; ?>
+                            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                        </div>
+                    <?php endif; ?>
+                    
+                    <!-- Edit Payment Form -->
+                    <?php if (isset($_GET['action']) && $_GET['action'] === 'edit' && $edit_payment): ?>
+                        <div class="content-card">
+                            <h5 class="mb-3">
+                                <i class="fas fa-credit-card me-2"></i>
+                                Edit Payment Record
+                            </h5>
+                            
+                            <form method="POST" action="">
+                                <input type="hidden" name="action" value="edit">
+                                <input type="hidden" name="payment_id" value="<?php echo $edit_payment['payment_id']; ?>">
+                                
+                                <div class="row">
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Student</label>
+                                        <input type="text" class="form-control" value="<?php echo $edit_payment['first_name'] . ' ' . $edit_payment['last_name']; ?>" disabled>
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Student ID</label>
+                                        <input type="text" class="form-control" value="<?php echo $edit_payment['student_id_number']; ?>" disabled>
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Program</label>
+                                        <input type="text" class="form-control" value="<?php echo $edit_payment['program_name']; ?>" disabled>
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Fee Type</label>
+                                        <input type="text" class="form-control" value="<?php echo $edit_payment['fee_type']; ?>" disabled>
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Amount (৳)</label>
+                                        <input type="number" class="form-control" name="amount" step="0.01" value="<?php echo $edit_payment['amount']; ?>" required>
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Status</label>
+                                        <select class="form-select" name="status" required>
+                                            <option value="pending" <?php echo ($edit_payment['status'] === 'pending') ? 'selected' : ''; ?>>Pending</option>
+                                            <option value="completed" <?php echo ($edit_payment['status'] === 'completed') ? 'selected' : ''; ?>>Completed</option>
+                                            <option value="failed" <?php echo ($edit_payment['status'] === 'failed') ? 'selected' : ''; ?>>Failed</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Transaction ID</label>
+                                        <input type="text" class="form-control" name="transaction_id" value="<?php echo $edit_payment['transaction_id'] ?? ''; ?>">
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Payment Method</label>
+                                        <input type="text" class="form-control" name="payment_method" value="<?php echo $edit_payment['payment_method'] ?? ''; ?>">
+                                    </div>
+                                </div>
+                                
+                                <div class="d-flex gap-2">
+                                    <button type="submit" class="btn btn-primary">
+                                        <i class="fas fa-save me-2"></i>
+                                        Update Payment
+                                    </button>
+                                    <a href="payments.php" class="btn btn-secondary">
+                                        <i class="fas fa-times me-2"></i>
+                                        Cancel
+                                    </a>
+                                </div>
+                            </form>
+                        </div>
+                    <?php endif; ?>
+                    
                     <!-- Payments List -->
                     <div class="content-card">
                         <h5 class="mb-3">
@@ -178,6 +305,7 @@ $payments = $stmt->fetchAll();
                                         <th>Payment Date</th>
                                         <th>Status</th>
                                         <th>Transaction ID</th>
+                                        <th>Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -196,6 +324,12 @@ $payments = $stmt->fetchAll();
                                                 </span>
                                             </td>
                                             <td><?php echo $payment['transaction_id'] ?: '-'; ?></td>
+                                            <td>
+                                                <a href="payments.php?action=edit&id=<?php echo $payment['payment_id']; ?>" 
+                                                   class="btn btn-sm btn-outline-primary">
+                                                    <i class="fas fa-edit"></i>
+                                                </a>
+                                            </td>
                                         </tr>
                                     <?php endforeach; ?>
                                 </tbody>
@@ -220,120 +354,5 @@ $payments = $stmt->fetchAll();
         });
     </script>
 
-    <!-- Debug Panel -->
-    <?php echo renderDebugPanel(); ?>
-    
-    <style>
-        .query-debugger {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            width: 500px;
-            max-height: 400px;
-            background: white;
-            border: 1px solid #ddd;
-            border-radius: 10px;
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
-            z-index: 9999;
-            display: none;
-        }
-        
-        .query-debugger.show {
-            display: block;
-        }
-        
-        .debug-header {
-            background: #f8f9fa;
-            padding: 10px 15px;
-            border-bottom: 1px solid #ddd;
-            border-radius: 10px 10px 0 0;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .debug-header h6 {
-            margin: 0;
-            color: #495057;
-        }
-        
-        .debug-content {
-            max-height: 300px;
-            overflow-y: auto;
-            padding: 15px;
-        }
-        
-        .query-item {
-            margin-bottom: 15px;
-            padding: 10px;
-            background: #f8f9fa;
-            border-radius: 5px;
-            border-left: 4px solid #007bff;
-        }
-        
-        .query-header {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 8px;
-        }
-        
-        .query-number {
-            font-weight: bold;
-            color: #007bff;
-        }
-        
-        .execution-time {
-            font-size: 0.8em;
-            color: #6c757d;
-            background: #e9ecef;
-            padding: 2px 6px;
-            border-radius: 3px;
-        }
-        
-        .query-sql pre {
-            background: #2d3748;
-            color: #e2e8f0;
-            padding: 10px;
-            border-radius: 5px;
-            font-size: 0.85em;
-            margin: 8px 0;
-            overflow-x: auto;
-        }
-        
-        .query-params {
-            font-size: 0.85em;
-            color: #6c757d;
-        }
-        
-        .query-params code {
-            background: #e9ecef;
-            padding: 2px 4px;
-            border-radius: 3px;
-            font-size: 0.8em;
-        }
-        
-        .debug-toggle {
-            margin-right: 10px;
-        }
-    </style>
-    
-    <script>
-        function toggleDebugger() {
-            const debugger = document.getElementById('queryDebugger');
-            if (debugger) {
-                debugger.classList.toggle('show');
-            }
-        }
-        
-        // Auto-show debugger if queries are present
-        <?php if (QueryDebugger::isEnabled() && !empty(QueryDebugger::getQueries())): ?>
-        document.addEventListener('DOMContentLoaded', function() {
-            const debugger = document.getElementById('queryDebugger');
-            if (debugger) {
-                debugger.classList.add('show');
-            }
-        });
-        <?php endif; ?>
-    </script>
 </body>
 </html>

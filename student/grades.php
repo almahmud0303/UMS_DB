@@ -3,13 +3,12 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/functions.php';
-require_once '../includes/debug.php';
-require_once '../includes/debug_toggle.php';
+require_once '../config/database.php';
 
 $auth = new Auth();
 $auth->requireRole('student');
 
-$database = new DebugDatabase();
+$database = new Database();
 $conn = $database->getConnection();
 $functions = new CommonFunctions();
 
@@ -176,7 +175,6 @@ foreach ($grades as $grade) {
                             <span class="navbar-text me-3">
                                 Welcome, <?php echo $_SESSION['first_name'] . ' ' . $_SESSION['last_name']; ?>
                             </span>
-                            <?php echo renderDebugToggle(); ?>
                             <a href="../logout.php" class="btn btn-outline-danger btn-sm">
                                 <i class="fas fa-sign-out-alt me-1"></i>
                                 Logout
@@ -292,121 +290,5 @@ foreach ($grades as $grade) {
     
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
-
-    <!-- Debug Panel -->
-    <?php echo renderDebugPanel(); ?>
-    
-    <style>
-        .query-debugger {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            width: 500px;
-            max-height: 400px;
-            background: white;
-            border: 1px solid #ddd;
-            border-radius: 10px;
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
-            z-index: 9999;
-            display: none;
-        }
-        
-        .query-debugger.show {
-            display: block;
-        }
-        
-        .debug-header {
-            background: #f8f9fa;
-            padding: 10px 15px;
-            border-bottom: 1px solid #ddd;
-            border-radius: 10px 10px 0 0;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .debug-header h6 {
-            margin: 0;
-            color: #495057;
-        }
-        
-        .debug-content {
-            max-height: 300px;
-            overflow-y: auto;
-            padding: 15px;
-        }
-        
-        .query-item {
-            margin-bottom: 15px;
-            padding: 10px;
-            background: #f8f9fa;
-            border-radius: 5px;
-            border-left: 4px solid #007bff;
-        }
-        
-        .query-header {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 8px;
-        }
-        
-        .query-number {
-            font-weight: bold;
-            color: #007bff;
-        }
-        
-        .execution-time {
-            font-size: 0.8em;
-            color: #6c757d;
-            background: #e9ecef;
-            padding: 2px 6px;
-            border-radius: 3px;
-        }
-        
-        .query-sql pre {
-            background: #2d3748;
-            color: #e2e8f0;
-            padding: 10px;
-            border-radius: 5px;
-            font-size: 0.85em;
-            margin: 8px 0;
-            overflow-x: auto;
-        }
-        
-        .query-params {
-            font-size: 0.85em;
-            color: #6c757d;
-        }
-        
-        .query-params code {
-            background: #e9ecef;
-            padding: 2px 4px;
-            border-radius: 3px;
-            font-size: 0.8em;
-        }
-        
-        .debug-toggle {
-            margin-right: 10px;
-        }
-    </style>
-    
-    <script>
-        function toggleDebugger() {
-            const debugger = document.getElementById('queryDebugger');
-            if (debugger) {
-                debugger.classList.toggle('show');
-            }
-        }
-        
-        // Auto-show debugger if queries are present
-        <?php if (QueryDebugger::isEnabled() && !empty(QueryDebugger::getQueries())): ?>
-        document.addEventListener('DOMContentLoaded', function() {
-            const debugger = document.getElementById('queryDebugger');
-            if (debugger) {
-                debugger.classList.add('show');
-            }
-        });
-        <?php endif; ?>
-    </script>
 </body>
 </html>

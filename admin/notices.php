@@ -3,13 +3,12 @@
 
 require_once '../includes/auth.php';
 require_once '../includes/functions.php';
-require_once '../includes/debug.php';
-require_once '../includes/debug_toggle.php';
+require_once '../config/database.php';
 
 $auth = new Auth();
 $auth->requireRole('admin');
 
-$database = new DebugDatabase();
+$database = new Database();
 $conn = $database->getConnection();
 $functions = new CommonFunctions();
 
@@ -51,6 +50,51 @@ if ($_POST) {
             $message_type = 'danger';
         }
     }
+    
+    if ($action === 'edit') {
+        $notice_id = $_POST['notice_id'];
+        $title = $functions->sanitize($_POST['title']);
+        $description = $functions->sanitize($_POST['description']);
+        $target_audience = $_POST['target_audience'];
+        $priority = $_POST['priority'];
+        $expiry_date = $_POST['expiry_date'] ?: null;
+        
+        try {
+            $query = "UPDATE notices SET title = :title, description = :description, 
+                     target_audience = :target_audience, priority = :priority, expiry_date = :expiry_date 
+                     WHERE notice_id = :notice_id";
+            
+            $stmt = $conn->prepare($query);
+            $stmt->bindParam(':notice_id', $notice_id);
+            $stmt->bindParam(':title', $title);
+            $stmt->bindParam(':description', $description);
+            $stmt->bindParam(':target_audience', $target_audience);
+            $stmt->bindParam(':priority', $priority);
+            $stmt->bindParam(':expiry_date', $expiry_date);
+            
+            if ($stmt->execute()) {
+                $message = 'Notice updated successfully!';
+                $message_type = 'success';
+            } else {
+                $message = 'Error updating notice.';
+                $message_type = 'danger';
+            }
+        } catch (Exception $e) {
+            $message = 'Error: ' . $e->getMessage();
+            $message_type = 'danger';
+        }
+    }
+}
+
+// Get single notice for editing
+$edit_notice = null;
+if (isset($_GET['action']) && $_GET['action'] === 'edit' && isset($_GET['id'])) {
+    $notice_id = $_GET['id'];
+    $query = "SELECT * FROM notices WHERE notice_id = :notice_id";
+    $stmt = $conn->prepare($query);
+    $stmt->bindParam(':notice_id', $notice_id);
+    $stmt->execute();
+    $edit_notice = $stmt->fetch();
 }
 
 // Handle delete
@@ -216,7 +260,6 @@ $notices = $stmt->fetchAll();
                             <span class="navbar-text me-3">
                                 Welcome, <?php echo $_SESSION['first_name'] . ' ' . $_SESSION['last_name']; ?>
                             </span>
-                            <?php echo renderDebugToggle(); ?>
                             <a href="../logout.php" class="btn btn-outline-danger btn-sm">
                                 <i class="fas fa-sign-out-alt me-1"></i>
                                 Logout
@@ -233,54 +276,57 @@ $notices = $stmt->fetchAll();
                         </div>
                     <?php endif; ?>
                     
-                    <!-- Add Notice Form -->
-                    <?php if (isset($_GET['action']) && $_GET['action'] === 'add'): ?>
+                    <!-- Add/Edit Notice Form -->
+                    <?php if (isset($_GET['action']) && ($_GET['action'] === 'add' || $_GET['action'] === 'edit')): ?>
                         <div class="content-card">
                             <h5 class="mb-3">
                                 <i class="fas fa-bullhorn me-2"></i>
-                                Post New Notice
+                                <?php echo $edit_notice ? 'Edit Notice' : 'Post New Notice'; ?>
                             </h5>
                             
                             <form method="POST" action="">
-                                <input type="hidden" name="action" value="add">
+                                <input type="hidden" name="action" value="<?php echo $edit_notice ? 'edit' : 'add'; ?>">
+                                <?php if ($edit_notice): ?>
+                                    <input type="hidden" name="notice_id" value="<?php echo $edit_notice['notice_id']; ?>">
+                                <?php endif; ?>
                                 
                                 <div class="row">
                                     <div class="col-12 mb-3">
                                         <label class="form-label">Title</label>
-                                        <input type="text" class="form-control" name="title" required>
+                                        <input type="text" class="form-control" name="title" value="<?php echo $edit_notice['title'] ?? ''; ?>" required>
                                     </div>
                                     <div class="col-12 mb-3">
                                         <label class="form-label">Description</label>
-                                        <textarea class="form-control" name="description" rows="5" required></textarea>
+                                        <textarea class="form-control" name="description" rows="5" required><?php echo $edit_notice['description'] ?? ''; ?></textarea>
                                     </div>
                                     <div class="col-md-6 mb-3">
                                         <label class="form-label">Target Audience</label>
                                         <select class="form-select" name="target_audience" required>
-                                            <option value="all">All Users</option>
-                                            <option value="students">Students Only</option>
-                                            <option value="teachers">Teachers Only</option>
-                                            <option value="admin">Admin Only</option>
+                                            <option value="all" <?php echo (($edit_notice['target_audience'] ?? '') === 'all') ? 'selected' : ''; ?>>All Users</option>
+                                            <option value="students" <?php echo (($edit_notice['target_audience'] ?? '') === 'students') ? 'selected' : ''; ?>>Students Only</option>
+                                            <option value="teachers" <?php echo (($edit_notice['target_audience'] ?? '') === 'teachers') ? 'selected' : ''; ?>>Teachers Only</option>
+                                            <option value="admin" <?php echo (($edit_notice['target_audience'] ?? '') === 'admin') ? 'selected' : ''; ?>>Admin Only</option>
                                         </select>
                                     </div>
                                     <div class="col-md-6 mb-3">
                                         <label class="form-label">Priority</label>
                                         <select class="form-select" name="priority" required>
-                                            <option value="low">Low</option>
-                                            <option value="medium">Medium</option>
-                                            <option value="high">High</option>
-                                            <option value="urgent">Urgent</option>
+                                            <option value="low" <?php echo (($edit_notice['priority'] ?? '') === 'low') ? 'selected' : ''; ?>>Low</option>
+                                            <option value="medium" <?php echo (($edit_notice['priority'] ?? '') === 'medium') ? 'selected' : ''; ?>>Medium</option>
+                                            <option value="high" <?php echo (($edit_notice['priority'] ?? '') === 'high') ? 'selected' : ''; ?>>High</option>
+                                            <option value="urgent" <?php echo (($edit_notice['priority'] ?? '') === 'urgent') ? 'selected' : ''; ?>>Urgent</option>
                                         </select>
                                     </div>
                                     <div class="col-md-6 mb-3">
                                         <label class="form-label">Expiry Date (Optional)</label>
-                                        <input type="date" class="form-control" name="expiry_date">
+                                        <input type="date" class="form-control" name="expiry_date" value="<?php echo $edit_notice['expiry_date'] ?? ''; ?>">
                                     </div>
                                 </div>
                                 
                                 <div class="d-flex gap-2">
                                     <button type="submit" class="btn btn-primary">
                                         <i class="fas fa-save me-2"></i>
-                                        Post Notice
+                                        <?php echo $edit_notice ? 'Update Notice' : 'Post Notice'; ?>
                                     </button>
                                     <a href="notices.php" class="btn btn-secondary">
                                         <i class="fas fa-times me-2"></i>
@@ -337,6 +383,10 @@ $notices = $stmt->fetchAll();
                                             <td><?php echo $notice['username']; ?></td>
                                             <td><?php echo $functions->formatDateTime($notice['date_posted'], 'M d, Y'); ?></td>
                                             <td>
+                                                <a href="notices.php?action=edit&id=<?php echo $notice['notice_id']; ?>" 
+                                                   class="btn btn-sm btn-outline-primary me-2">
+                                                    <i class="fas fa-edit"></i>
+                                                </a>
                                                 <a href="notices.php?delete=<?php echo $notice['notice_id']; ?>" 
                                                    class="btn btn-sm btn-outline-danger"
                                                    onclick="return confirm('Are you sure you want to delete this notice?')">
@@ -367,120 +417,5 @@ $notices = $stmt->fetchAll();
         });
     </script>
 
-    <!-- Debug Panel -->
-    <?php echo renderDebugPanel(); ?>
-    
-    <style>
-        .query-debugger {
-            position: fixed;
-            bottom: 20px;
-            right: 20px;
-            width: 500px;
-            max-height: 400px;
-            background: white;
-            border: 1px solid #ddd;
-            border-radius: 10px;
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
-            z-index: 9999;
-            display: none;
-        }
-        
-        .query-debugger.show {
-            display: block;
-        }
-        
-        .debug-header {
-            background: #f8f9fa;
-            padding: 10px 15px;
-            border-bottom: 1px solid #ddd;
-            border-radius: 10px 10px 0 0;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .debug-header h6 {
-            margin: 0;
-            color: #495057;
-        }
-        
-        .debug-content {
-            max-height: 300px;
-            overflow-y: auto;
-            padding: 15px;
-        }
-        
-        .query-item {
-            margin-bottom: 15px;
-            padding: 10px;
-            background: #f8f9fa;
-            border-radius: 5px;
-            border-left: 4px solid #007bff;
-        }
-        
-        .query-header {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 8px;
-        }
-        
-        .query-number {
-            font-weight: bold;
-            color: #007bff;
-        }
-        
-        .execution-time {
-            font-size: 0.8em;
-            color: #6c757d;
-            background: #e9ecef;
-            padding: 2px 6px;
-            border-radius: 3px;
-        }
-        
-        .query-sql pre {
-            background: #2d3748;
-            color: #e2e8f0;
-            padding: 10px;
-            border-radius: 5px;
-            font-size: 0.85em;
-            margin: 8px 0;
-            overflow-x: auto;
-        }
-        
-        .query-params {
-            font-size: 0.85em;
-            color: #6c757d;
-        }
-        
-        .query-params code {
-            background: #e9ecef;
-            padding: 2px 4px;
-            border-radius: 3px;
-            font-size: 0.8em;
-        }
-        
-        .debug-toggle {
-            margin-right: 10px;
-        }
-    </style>
-    
-    <script>
-        function toggleDebugger() {
-            const debugger = document.getElementById('queryDebugger');
-            if (debugger) {
-                debugger.classList.toggle('show');
-            }
-        }
-        
-        // Auto-show debugger if queries are present
-        <?php if (QueryDebugger::isEnabled() && !empty(QueryDebugger::getQueries())): ?>
-        document.addEventListener('DOMContentLoaded', function() {
-            const debugger = document.getElementById('queryDebugger');
-            if (debugger) {
-                debugger.classList.add('show');
-            }
-        });
-        <?php endif; ?>
-    </script>
 </body>
 </html>
