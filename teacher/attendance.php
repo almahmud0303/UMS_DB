@@ -29,6 +29,7 @@ $courses = $stmt->fetchAll();
 // Get students for selected course
 $students = [];
 $selected_course = null;
+$attendance_records = [];
 if (isset($_GET['course'])) {
     $offering_id = $_GET['course'];
     
@@ -54,6 +55,20 @@ if (isset($_GET['course'])) {
         $stmt->bindParam(':offering_id', $offering_id);
         $stmt->execute();
         $students = $stmt->fetchAll();
+        
+        // Get attendance records for this course
+        $query = "SELECT a.*, s.first_name, s.last_name, s.student_id_number, s.roll_number
+                  FROM attendance a
+                  JOIN enrollments e ON a.enrollment_id = e.enrollment_id
+                  JOIN students s ON e.student_id = s.student_id
+                  WHERE e.offering_id = :offering_id AND a.marked_by = :teacher_id
+                  ORDER BY a.date DESC, s.first_name, s.last_name";
+        
+        $stmt = $conn->prepare($query);
+        $stmt->bindParam(':offering_id', $offering_id);
+        $stmt->bindParam(':teacher_id', $teacher_id);
+        $stmt->execute();
+        $attendance_records = $stmt->fetchAll();
     }
 }
 
@@ -375,6 +390,48 @@ if ($_POST && isset($_POST['action']) && $_POST['action'] === 'submit_attendance
                                     <i class="fas fa-arrow-left me-2"></i>
                                     Back to Courses
                                 </a>
+                            </div>
+                        </div>
+                    <?php endif; ?>
+                    
+                    <!-- Attendance History -->
+                    <?php if ($selected_course && !empty($attendance_records)): ?>
+                        <div class="content-card">
+                            <h5 class="mb-3">
+                                <i class="fas fa-history me-2"></i>
+                                Attendance History
+                            </h5>
+                            <p class="text-muted mb-3">Past attendance records for <?php echo $selected_course['course_code']; ?></p>
+                            
+                            <div class="table-responsive">
+                                <table class="table table-striped table-hover">
+                                    <thead>
+                                        <tr>
+                                            <th>Date</th>
+                                            <th>Student</th>
+                                            <th>Student ID</th>
+                                            <th>Roll Number</th>
+                                            <th>Status</th>
+                                            <th>Remarks</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($attendance_records as $record): ?>
+                                            <tr>
+                                                <td><?php echo $functions->formatDateTime($record['date'], 'M d, Y'); ?></td>
+                                                <td><?php echo $record['first_name'] . ' ' . $record['last_name']; ?></td>
+                                                <td><?php echo $record['student_id_number']; ?></td>
+                                                <td><?php echo $record['roll_number']; ?></td>
+                                                <td>
+                                                    <span class="badge bg-<?php echo ($record['status'] === 'present') ? 'success' : (($record['status'] === 'absent') ? 'danger' : 'warning'); ?>">
+                                                        <?php echo ucfirst($record['status']); ?>
+                                                    </span>
+                                                </td>
+                                                <td><?php echo $record['remarks'] ?? '-'; ?></td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     <?php endif; ?>

@@ -29,37 +29,86 @@ $student = $stmt->fetch();
 $message = '';
 $message_type = '';
 
+// Handle password change
+if ($_POST && isset($_POST['action']) && $_POST['action'] === 'change_password') {
+    $current_password = $_POST['current_password'];
+    $new_password = $_POST['new_password'];
+    $confirm_password = $_POST['confirm_password'];
+    
+    if ($new_password !== $confirm_password) {
+        $message = 'New passwords do not match.';
+        $message_type = 'danger';
+    } elseif (strlen($new_password) < 6) {
+        $message = 'Password must be at least 6 characters long.';
+        $message_type = 'danger';
+    } else {
+        try {
+            // Get user_id from students table
+            $query = "SELECT user_id FROM students WHERE student_id = :student_id";
+            $stmt = $conn->prepare($query);
+            $stmt->bindParam(':student_id', $student_id);
+            $stmt->execute();
+            $student_data = $stmt->fetch();
+            $user_id = $student_data['user_id'];
+            
+            // Verify current password
+            $query = "SELECT * FROM users WHERE user_id = :user_id";
+            $stmt = $conn->prepare($query);
+            $stmt->bindParam(':user_id', $user_id);
+            $stmt->execute();
+            $user = $stmt->fetch();
+            
+            if ($user && password_verify($current_password, $user['password'])) {
+                // Update password
+                $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
+                $query = "UPDATE users SET password = :password WHERE user_id = :user_id";
+                $stmt = $conn->prepare($query);
+                $stmt->bindParam(':password', $hashed_password);
+                $stmt->bindParam(':user_id', $user_id);
+                
+                if ($stmt->execute()) {
+                    $message = 'Password changed successfully!';
+                    $message_type = 'success';
+                } else {
+                    $message = 'Error changing password.';
+                    $message_type = 'danger';
+                }
+            } else {
+                $message = 'Current password is incorrect.';
+                $message_type = 'danger';
+            }
+        } catch (Exception $e) {
+            $message = 'Error: ' . $e->getMessage();
+            $message_type = 'danger';
+        }
+    }
+}
+
 // Handle profile update
 if ($_POST && isset($_POST['action']) && $_POST['action'] === 'update_profile') {
     $first_name = $functions->sanitize($_POST['first_name']);
     $last_name = $functions->sanitize($_POST['last_name']);
-    $email = $functions->sanitize($_POST['email']);
     $phone = $functions->sanitize($_POST['phone']);
     $address = $functions->sanitize($_POST['address']);
     $emergency_contact = $functions->sanitize($_POST['emergency_contact']);
-    $emergency_phone = $functions->sanitize($_POST['emergency_phone']);
     
     try {
         $query = "UPDATE students SET first_name = :first_name, last_name = :last_name, 
-                 email = :email, phone = :phone, address = :address, 
-                 emergency_contact = :emergency_contact, emergency_phone = :emergency_phone 
+                 phone = :phone, address = :address, emergency_contact = :emergency_contact 
                  WHERE student_id = :student_id";
         
         $stmt = $conn->prepare($query);
         $stmt->bindParam(':student_id', $student_id);
         $stmt->bindParam(':first_name', $first_name);
         $stmt->bindParam(':last_name', $last_name);
-        $stmt->bindParam(':email', $email);
         $stmt->bindParam(':phone', $phone);
         $stmt->bindParam(':address', $address);
         $stmt->bindParam(':emergency_contact', $emergency_contact);
-        $stmt->bindParam(':emergency_phone', $emergency_phone);
         
         if ($stmt->execute()) {
             // Update session variables
             $_SESSION['first_name'] = $first_name;
             $_SESSION['last_name'] = $last_name;
-            $_SESSION['email'] = $email;
             
             $message = 'Profile updated successfully!';
             $message_type = 'success';
@@ -233,6 +282,41 @@ if ($_POST && isset($_POST['action']) && $_POST['action'] === 'update_profile') 
                         <p class="mb-0">Roll Number: <?php echo $student['roll_number']; ?></p>
                     </div>
                     
+                    <!-- Change Password Card -->
+                    <div class="content-card mb-4">
+                        <h5 class="mb-3">
+                            <i class="fas fa-lock me-2"></i>
+                            Change Password
+                        </h5>
+                        
+                        <form method="POST" action="">
+                            <input type="hidden" name="action" value="change_password">
+                            
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Current Password</label>
+                                    <input type="password" class="form-control" name="current_password" 
+                                           placeholder="Enter current password" required>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">New Password</label>
+                                    <input type="password" class="form-control" name="new_password" 
+                                           placeholder="Enter new password (min 6 characters)" required minlength="6">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Confirm New Password</label>
+                                    <input type="password" class="form-control" name="confirm_password" 
+                                           placeholder="Confirm new password" required minlength="6">
+                                </div>
+                            </div>
+                            
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save me-2"></i>
+                                Change Password
+                            </button>
+                        </form>
+                    </div>
+                    
                     <!-- Profile Information -->
                     <div class="content-card">
                         <h5 class="mb-3">
@@ -256,8 +340,9 @@ if ($_POST && isset($_POST['action']) && $_POST['action'] === 'update_profile') 
                                 </div>
                                 <div class="col-md-6 mb-3">
                                     <label class="form-label">Email</label>
-                                    <input type="email" class="form-control" name="email" 
-                                           value="<?php echo $student['email'] ?? ''; ?>" required>
+                                    <input type="email" class="form-control" 
+                                           value="<?php echo $_SESSION['email'] ?? ''; ?>" disabled readonly>
+                                    <small class="form-text text-muted">Email cannot be changed</small>
                                 </div>
                                 <div class="col-md-6 mb-3">
                                     <label class="form-label">Phone</label>
@@ -268,15 +353,11 @@ if ($_POST && isset($_POST['action']) && $_POST['action'] === 'update_profile') 
                                     <label class="form-label">Address</label>
                                     <textarea class="form-control" name="address" rows="3"><?php echo $student['address'] ?? ''; ?></textarea>
                                 </div>
-                                <div class="col-md-6 mb-3">
+                                <div class="col-12 mb-3">
                                     <label class="form-label">Emergency Contact</label>
                                     <input type="text" class="form-control" name="emergency_contact" 
-                                           value="<?php echo $student['emergency_contact'] ?? ''; ?>">
-                                </div>
-                                <div class="col-md-6 mb-3">
-                                    <label class="form-label">Emergency Phone</label>
-                                    <input type="tel" class="form-control" name="emergency_phone" 
-                                           value="<?php echo $student['emergency_phone'] ?? ''; ?>">
+                                           value="<?php echo $student['emergency_contact'] ?? ''; ?>"
+                                           placeholder="Contact name and phone number">
                                 </div>
                             </div>
                             

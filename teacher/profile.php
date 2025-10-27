@@ -14,10 +14,11 @@ $functions = new CommonFunctions();
 
 $teacher_id = $_SESSION['profile_id'];
 
-// Get teacher information
-$query = "SELECT t.*, d.name as department_name
+// Get teacher information with email
+$query = "SELECT t.*, d.name as department_name, u.email
           FROM teachers t
           JOIN departments d ON t.department_id = d.department_id
+          JOIN users u ON t.user_id = u.user_id
           WHERE t.teacher_id = :teacher_id";
 
 $stmt = $conn->prepare($query);
@@ -28,6 +29,61 @@ $teacher = $stmt->fetch();
 $message = '';
 $message_type = '';
 
+// Handle password change
+if ($_POST && isset($_POST['action']) && $_POST['action'] === 'change_password') {
+    $current_password = $_POST['current_password'];
+    $new_password = $_POST['new_password'];
+    $confirm_password = $_POST['confirm_password'];
+    
+    if ($new_password !== $confirm_password) {
+        $message = 'New passwords do not match.';
+        $message_type = 'danger';
+    } elseif (strlen($new_password) < 6) {
+        $message = 'Password must be at least 6 characters long.';
+        $message_type = 'danger';
+    } else {
+        try {
+            // Get user_id from teachers table
+            $query = "SELECT user_id FROM teachers WHERE teacher_id = :teacher_id";
+            $stmt = $conn->prepare($query);
+            $stmt->bindParam(':teacher_id', $teacher_id);
+            $stmt->execute();
+            $teacher_data = $stmt->fetch();
+            $user_id = $teacher_data['user_id'];
+            
+            // Verify current password
+            $query = "SELECT * FROM users WHERE user_id = :user_id";
+            $stmt = $conn->prepare($query);
+            $stmt->bindParam(':user_id', $user_id);
+            $stmt->execute();
+            $user = $stmt->fetch();
+            
+            if ($user && password_verify($current_password, $user['password'])) {
+                // Update password
+                $hashed_password = password_hash($new_password, PASSWORD_DEFAULT);
+                $query = "UPDATE users SET password = :password WHERE user_id = :user_id";
+                $stmt = $conn->prepare($query);
+                $stmt->bindParam(':password', $hashed_password);
+                $stmt->bindParam(':user_id', $user_id);
+                
+                if ($stmt->execute()) {
+                    $message = 'Password changed successfully!';
+                    $message_type = 'success';
+                } else {
+                    $message = 'Error changing password.';
+                    $message_type = 'danger';
+                }
+            } else {
+                $message = 'Current password is incorrect.';
+                $message_type = 'danger';
+            }
+        } catch (Exception $e) {
+            $message = 'Error: ' . $e->getMessage();
+            $message_type = 'danger';
+        }
+    }
+}
+
 // Handle profile update
 if ($_POST && isset($_POST['action']) && $_POST['action'] === 'update_profile') {
     $first_name = $functions->sanitize($_POST['first_name']);
@@ -35,13 +91,11 @@ if ($_POST && isset($_POST['action']) && $_POST['action'] === 'update_profile') 
     $designation = $functions->sanitize($_POST['designation']);
     $phone = $functions->sanitize($_POST['phone']);
     $address = $functions->sanitize($_POST['address']);
-    $qualification = $functions->sanitize($_POST['qualification']);
-    $specialization = $functions->sanitize($_POST['specialization']);
+
     
     try {
         $query = "UPDATE teachers SET first_name = :first_name, last_name = :last_name, 
-                 designation = :designation, phone = :phone, address = :address, 
-                 qualification = :qualification, specialization = :specialization 
+                 designation = :designation, phone = :phone, address = :address 
                  WHERE teacher_id = :teacher_id";
         
         $stmt = $conn->prepare($query);
@@ -51,8 +105,6 @@ if ($_POST && isset($_POST['action']) && $_POST['action'] === 'update_profile') 
         $stmt->bindParam(':designation', $designation);
         $stmt->bindParam(':phone', $phone);
         $stmt->bindParam(':address', $address);
-        $stmt->bindParam(':qualification', $qualification);
-        $stmt->bindParam(':specialization', $specialization);
         
         if ($stmt->execute()) {
             // Update session variables
@@ -63,9 +115,10 @@ if ($_POST && isset($_POST['action']) && $_POST['action'] === 'update_profile') 
             $message_type = 'success';
             
             // Refresh teacher data
-            $query = "SELECT t.*, d.name as department_name
+            $query = "SELECT t.*, d.name as department_name, u.email
                       FROM teachers t
                       JOIN departments d ON t.department_id = d.department_id
+                      JOIN users u ON t.user_id = u.user_id
                       WHERE t.teacher_id = :teacher_id";
             
             $stmt = $conn->prepare($query);
@@ -230,6 +283,41 @@ if ($_POST && isset($_POST['action']) && $_POST['action'] === 'update_profile') 
                         <p class="mb-0"><?php echo $teacher['designation']; ?></p>
                     </div>
                     
+                    <!-- Change Password Card -->
+                    <div class="content-card mb-4">
+                        <h5 class="mb-3">
+                            <i class="fas fa-lock me-2"></i>
+                            Change Password
+                        </h5>
+                        
+                        <form method="POST" action="">
+                            <input type="hidden" name="action" value="change_password">
+                            
+                            <div class="row">
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Current Password</label>
+                                    <input type="password" class="form-control" name="current_password" 
+                                           placeholder="Enter current password" required>
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">New Password</label>
+                                    <input type="password" class="form-control" name="new_password" 
+                                           placeholder="Enter new password (min 6 characters)" required minlength="6">
+                                </div>
+                                <div class="col-md-6 mb-3">
+                                    <label class="form-label">Confirm New Password</label>
+                                    <input type="password" class="form-control" name="confirm_password" 
+                                           placeholder="Confirm new password" required minlength="6">
+                                </div>
+                            </div>
+                            
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save me-2"></i>
+                                Change Password
+                            </button>
+                        </form>
+                    </div>
+                    
                     <!-- Profile Information -->
                     <div class="content-card">
                         <h5 class="mb-3">
@@ -257,6 +345,12 @@ if ($_POST && isset($_POST['action']) && $_POST['action'] === 'update_profile') 
                                            value="<?php echo $teacher['designation'] ?? ''; ?>">
                                 </div>
                                 <div class="col-md-6 mb-3">
+                                    <label class="form-label">Email</label>
+                                    <input type="email" class="form-control" 
+                                           value="<?php echo $teacher['email'] ?? ''; ?>" disabled readonly>
+                                    <small class="form-text text-muted">Email cannot be changed</small>
+                                </div>
+                                <div class="col-md-6 mb-3">
                                     <label class="form-label">Phone</label>
                                     <input type="tel" class="form-control" name="phone" 
                                            value="<?php echo $teacher['phone'] ?? ''; ?>">
@@ -264,16 +358,6 @@ if ($_POST && isset($_POST['action']) && $_POST['action'] === 'update_profile') 
                                 <div class="col-12 mb-3">
                                     <label class="form-label">Address</label>
                                     <textarea class="form-control" name="address" rows="3"><?php echo $teacher['address'] ?? ''; ?></textarea>
-                                </div>
-                                <div class="col-md-6 mb-3">
-                                    <label class="form-label">Qualification</label>
-                                    <input type="text" class="form-control" name="qualification" 
-                                           value="<?php echo $teacher['qualification'] ?? ''; ?>">
-                                </div>
-                                <div class="col-md-6 mb-3">
-                                    <label class="form-label">Specialization</label>
-                                    <input type="text" class="form-control" name="specialization" 
-                                           value="<?php echo $teacher['specialization'] ?? ''; ?>">
                                 </div>
                             </div>
                             

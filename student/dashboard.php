@@ -201,6 +201,10 @@ $fee_status = $stmt->fetchAll();
                             <i class="fas fa-credit-card me-2"></i>
                             Payments
                         </a>
+                        <a class="nav-link" href="library.php">
+                            <i class="fas fa-book-open me-2"></i>
+                            Library
+                        </a>
                         <a class="nav-link" href="profile.php">
                             <i class="fas fa-user me-2"></i>
                             Profile

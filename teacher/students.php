@@ -45,9 +45,10 @@ if (isset($_GET['course'])) {
     if ($selected_course) {
         // Get students enrolled in this course
         $query = "SELECT s.*, e.enrollment_id, e.enrollment_date, e.status,
-                         g.grade_letter, g.grade_point
+                         g.grade_letter, g.grade_point, u.email
                   FROM enrollments e
                   JOIN students s ON e.student_id = s.student_id
+                  JOIN users u ON s.user_id = u.user_id
                   LEFT JOIN grades g ON e.enrollment_id = g.enrollment_id
                   WHERE e.offering_id = :offering_id
                   ORDER BY s.first_name, s.last_name";
